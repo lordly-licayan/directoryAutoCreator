@@ -91,7 +91,7 @@ def process(findingsFileDict, encoding, folderPrefix, noOfDigits):
     packagePattern= config['OTHERS']['PACKAGE_PATTERN']
     testClassTemple= config['OTHERS']['TEST_CLASS_TEMPLATE']
     testClassTemplePath= os.path.join(currentPath, testClassTemple)
-    regExPattern1= re.compile('\+\s*(\w+)\s*\+')
+    regExPattern1= re.compile('\+\s*(\w+)\s*[\+;]*')
 
     for fileNameKey in findingsFileDict:
         findingsInfo= findingsFileDict[fileNameKey]
