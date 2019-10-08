@@ -2,6 +2,7 @@ import configparser, os, re, datetime, time, xlrd, xlsxwriter
 from pathlib import Path
 from os.path import exists
 from shutil import copyfile
+from distutils.util import strtobool
 
 configFileName= 'config.ini'
 
@@ -9,9 +10,10 @@ config_file = os.path.join(Path(__file__).resolve().parent, configFileName)
 config = configparser.ConfigParser()
 config.read(config_file,encoding='UTF-8')
 
-
 outputFolder= config['PATH']['OUTPUT_PATH'] 
-indicator = config['SHEET']['FINDINGS_INDICATOR']
+indicator= config['SHEET']['FINDINGS_INDICATOR']
+todo= config['OTHERS']['TODO']
+isOverwriteFiles= strtobool(config['OTHERS']['OVERWRITE_FILES'])
 
 
 def makeDirectory(folderPath):
@@ -55,7 +57,13 @@ def extractFiles(path, findingsFileDict, fileSearchPattern):
             index= re.search(fileSearchPattern, filePath)
             if index:
                 for fileName in findingsFileDict:
-                    if fileName.lower().strip() in filePath.lower().strip():
+                    findingsFileName= fileName.lower().strip()
+                    srcFilePath= filePath.lower().strip()
+                    indexSrc= re.search('src', filePath)
+                    if indexSrc:
+                        srcFilePath= srcFilePath[indexSrc.end():]
+                    
+                    if findingsFileName in srcFilePath or srcFilePath in findingsFileName:
                         itemList= findingsFileDict[fileName]
                         itemList.append(filePath)
                         itemList.append(file)
@@ -71,7 +79,8 @@ def getFolderSuffix(start, counter, noOfDigits= 3):
 
 
 def makeTestFile(outputPathTest, fileName, testClassTemplePath, packageName, className):
-    testClass = open('{}\\Test{}'.format(outputPathTest, fileName), 'w', encoding= encoding)
+    testFileName= '{}\\Test{}'.format(outputPathTest, fileName)
+    testClass = open(testFileName, 'w', encoding= encoding)
     with open(testClassTemplePath, 'rt', encoding= encoding) as fp:
         for line in fp:
             if '<packageName>' in line:
@@ -82,42 +91,49 @@ def makeTestFile(outputPathTest, fileName, testClassTemplePath, packageName, cla
             testClass.write(line)
     if not testClass.closed:
         testClass.close()
-
+    
+    return testFileName
 
 
 def process(findingsFileDict, encoding, folderPrefix, noOfDigits):
     currentPath= Path(__file__).resolve().parent
     outputRootPath= os.path.join(currentPath, outputFolder)
+    testFileOutputPath= config['PATH']['TEST_PATH']
     packagePattern= config['OTHERS']['PACKAGE_PATTERN']
     testClassTemple= config['OTHERS']['TEST_CLASS_TEMPLATE']
     testClassTemplePath= os.path.join(currentPath, testClassTemple)
-    regExPattern1= re.compile('\+\s*(\w+)\s*[\+;]*')
+    regExPattern1= re.compile('\+\s*(\w+)\s*[\+;)]*')
+    regExPattern2= re.compile('^[^"]*?\s*(\w+)\s*[\+;)]*[^"]*?')
+    
 
     for fileNameKey in findingsFileDict:
         findingsInfo= findingsFileDict[fileNameKey]
+        
         start= findingsInfo[0]
         counter= findingsInfo[1]
-        output= folderPrefix + getFolderSuffix(start, counter, noOfDigits)
-        outputPath= os.path.join(outputRootPath, output)
         sourceFileName= findingsInfo[2]
         fileName= findingsInfo[3]
         findingsFileName= findingsInfo[4]
-        fileExtensionIndex= re.search('\.', fileName)
-        className= fileName[:fileExtensionIndex.start()]
+        className= fileName[:re.search('\.', fileName).start()]
 
-        initOutputPath= findingsFileName.replace(fileName, '')
-        outputPath= os.path.join(outputPath, initOutputPath)
-        makeDirectory(outputPath)
-
-        testFolder= initOutputPath.split('\\')[1]
-        outputPathTest= outputPath.replace(testFolder, '{}\\{}'.format(testFolder, 'test'))
-        makeDirectory(outputPathTest)
+        itemOutputFolder= folderPrefix + getFolderSuffix(start, counter, noOfDigits)
+        outputPath= os.path.join(outputRootPath, itemOutputFolder)
         
+        initOutputPath= findingsFileName.replace(fileName, '')
+        outputSourcePath= os.path.join(outputPath, initOutputPath)
+        makeDirectory(outputSourcePath)
+
+        initOutputPathSplitted= initOutputPath.split('\\')
+        outputTestFolder= initOutputPath.replace(initOutputPathSplitted[1], '{}\\{}'.format(initOutputPathSplitted[1], 'test'))
+        outputTestPath= os.path.join(outputPath, outputTestFolder)
+        makeDirectory(outputTestPath)        
+
         with open(sourceFileName, 'rt', encoding= encoding) as fp:
             print("sourceFileName: %s" %sourceFileName)
             packageName= None
             lineNo= 0
-            classFile = open(os.path.join(outputPath, fileName), 'w', encoding= encoding)
+            isBrokenConCat= False
+            classFile = open(os.path.join(outputSourcePath, fileName), 'w', encoding= encoding)
             
             for line in fp:
                 lineNo += 1
@@ -126,10 +142,18 @@ def process(findingsFileDict, encoding, folderPrefix, noOfDigits):
                 if len(result) > 0:
                     packageName= 'test.{}'.format(result[0])
                 
+                if isBrokenConCat:
+                    result= regExPattern2.search(line)
+                    if result:
+                        line = line.replace('\n',  '  {} [Broken Concat]\n'.format(todo))
+                    isBrokenConCat= False
+
+                if line.strip().endswith('+'):
+                    isBrokenConCat= True
                 
                 result= regExPattern1.findall(line)
                 if len(result)>0:
-                    line = line.replace('\n', '  /* ??? */\n')
+                    line = line.replace('\n',  '  {}\n'.format(todo))
 
                 classFile.write(line)
             
@@ -137,16 +161,29 @@ def process(findingsFileDict, encoding, folderPrefix, noOfDigits):
                 classFile.close()
 
             if not packageName:
-                index= re.search('test', outputPathTest)
-                packageName= outputPathTest[index.start():len(outputPathTest)-1].replace('\\','.')
+                index= re.search('test', outputTestPath)
+                packageName= outputTestPath[index.start():len(outputTestPath)-1].replace('\\','.')
             
-            makeTestFile(outputPathTest, fileName, testClassTemplePath, packageName, className)
+            for i in range(counter):
+                newClassName= '{}{}'.format(className, str(start + i))
+                testFileName= makeTestFile(outputTestPath, fileName.replace(className, newClassName), testClassTemplePath, packageName, newClassName)
+                
+                originalTestOutputPath= os.path.join(testFileOutputPath, outputTestFolder.replace('{}\\'.format(initOutputPathSplitted[0]),''))
+                makeDirectory(originalTestOutputPath)
+
+                workspaceTestFileName= '{}\\Test{}'.format(originalTestOutputPath, fileName.replace(className, newClassName))
+
+                if not isOverwriteFiles and os.path.exists(workspaceTestFileName):
+                    pass
+                else:
+                    copyfile(testFileName, workspaceTestFileName)
 
 
 if __name__ == "__main__":
     try:
         start = datetime.datetime.now()
-        
+        print(f'\nInitializing...\nTime started: {start}')
+
         sourcePath= config['PATH']['SOURCE_CODE_PATH']
         filesSearchPattern = config['OTHERS']['FILES_SEARCH_PATTERN']
         filesToFind = config['OTHERS']['FILES_TO_FIND']
