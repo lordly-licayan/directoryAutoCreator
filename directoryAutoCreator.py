@@ -10,11 +10,16 @@ config_file = os.path.join(Path(__file__).resolve().parent, configFileName)
 config = configparser.ConfigParser()
 config.read(config_file,encoding='UTF-8')
 
+
 outputFolder= config['PATH']['OUTPUT_PATH'] 
 indicator= config['SHEET']['FINDINGS_INDICATOR']
 todo= config['OTHERS']['TODO']
-isOverwriteFiles= strtobool(config['OTHERS']['OVERWRITE_FILES'])
+isOverwriteFiles= strtobool(config['FLAG']['OVERWRITE_FILES'])
+isAppendTodo= strtobool(config['FLAG']['TODO_MARKER_FLAG'])
+isAppendIssueNo= strtobool(config['FLAG']['ISSUE_MARKER_FLAG'])
 
+TO_FIX_PATTERN= config['REG_EX']['TO_FIX_PATTERN']
+AFTER_BROKEN_CONCAT_PATTERN= config['REG_EX']['AFTER_BROKEN_CONCAT_PATTERN']
 
 def makeDirectory(folderPath):
     if not exists(folderPath):
@@ -26,6 +31,9 @@ def getFindingsFiles(filesToFind):
     sheetName = config['SHEET']['SHEET_NAME']
     rowIndicator= int(config['SHEET']['ROW_INDICATOR'])
     rowFileName= int(config['SHEET']['ROW_FILE_NAME'])
+    rowItemNo= int(config['SHEET']['ROW_ITEM_NO'])
+    rowLineNo= int(config['SHEET']['ROW_LINE_NO'])
+
     sheetName = config['SHEET']['SHEET_NAME']
     
     findingsFileDict= {}
@@ -38,13 +46,22 @@ def getFindingsFiles(filesToFind):
         if row[rowIndicator] == indicator and any(row[rowFileName].endswith(f'{extension}') for extension in filesToFind):
             lineNo += 1
             fileName= row[rowFileName]
+            itemNo= int(row[rowItemNo])
+            issueLineNo= None
+            issueLineNoIndex= re.search(r'\((\w*)', row[rowLineNo])
+            if issueLineNoIndex:
+                issueLineNo= int(row[rowLineNo][issueLineNoIndex.start()+1:issueLineNoIndex.end()])
 
             if fileName in findingsFileDict:
                 findingsCounter= findingsFileDict[fileName]
                 findingsCounter[1]= findingsCounter[1]+1
+                issuesDict= findingsCounter[2]
+                issuesDict[issueLineNo]= itemNo
                 findingsFileDict[fileName]= findingsCounter
-            else:    
-                findingsFileDict[fileName]= [lineNo, 1]
+            else:
+                issuesDict={}
+                issuesDict[issueLineNo]= itemNo
+                findingsFileDict[fileName]= [lineNo, 1, issuesDict]
             
     return findingsFileDict
 
@@ -75,7 +92,7 @@ def getFolderSuffix(start, counter, noOfDigits= 3):
     if counter == 1:
         return '{0:0d}'.replace('d', str(noOfDigits)).format(start)
     else:
-        return '{}_{}'.format('{0:0d}'.replace('d', str(noOfDigits)).format(start), '{0:0d}'.replace('d', str(noOfDigits)).format(start + counter-1))
+        return '{}-{}'.format('{0:0d}'.replace('d', str(noOfDigits)).format(start), '{0:0d}'.replace('d', str(noOfDigits)).format(start + counter-1))
 
 
 def makeTestFile(outputPathTest, fileName, testClassTemplePath, packageName, className):
@@ -102,8 +119,8 @@ def process(findingsFileDict, encoding, folderPrefix, noOfDigits):
     packagePattern= config['OTHERS']['PACKAGE_PATTERN']
     testClassTemple= config['OTHERS']['TEST_CLASS_TEMPLATE']
     testClassTemplePath= os.path.join(currentPath, testClassTemple)
-    regExPattern1= re.compile('\+\s*(\w+)\s*[\+;)]*')
-    regExPattern2= re.compile('^[^"]*?\s*(\w+)\s*[\+;)]*[^"]*?')
+    regExPattern1= re.compile(TO_FIX_PATTERN)
+    regExPattern2= re.compile(AFTER_BROKEN_CONCAT_PATTERN)
     
 
     for fileNameKey in findingsFileDict:
@@ -111,9 +128,10 @@ def process(findingsFileDict, encoding, folderPrefix, noOfDigits):
         
         start= findingsInfo[0]
         counter= findingsInfo[1]
-        sourceFileName= findingsInfo[2]
-        fileName= findingsInfo[3]
-        findingsFileName= findingsInfo[4]
+        issuesDict= findingsInfo[2]
+        sourceFileName= findingsInfo[3]
+        fileName= findingsInfo[4]
+        findingsFileName= findingsInfo[5]
         className= fileName[:re.search('\.', fileName).start()]
 
         itemOutputFolder= folderPrefix + getFolderSuffix(start, counter, noOfDigits)
@@ -129,7 +147,7 @@ def process(findingsFileDict, encoding, folderPrefix, noOfDigits):
         makeDirectory(outputTestPath)        
 
         with open(sourceFileName, 'rt', encoding= encoding) as fp:
-            print("sourceFileName: %s" %sourceFileName)
+            print("SourceFileName: %s" %sourceFileName)
             packageName= None
             lineNo= 0
             isBrokenConCat= False
@@ -142,18 +160,22 @@ def process(findingsFileDict, encoding, folderPrefix, noOfDigits):
                 if len(result) > 0:
                     packageName= 'test.{}'.format(result[0])
                 
-                if isBrokenConCat:
-                    result= regExPattern2.search(line)
-                    if result:
-                        line = line.replace('\n',  '  {} [Broken Concat]\n'.format(todo))
-                    isBrokenConCat= False
+                if isAppendTodo:
+                    if isBrokenConCat and not line.strip().startswith(('//','/*')) :
+                        result= regExPattern2.search(line) 
+                        if result:
+                            line = line.replace('\n',  '  {} [Broken Concat]\n'.format(todo))
+                        isBrokenConCat= False
 
-                if line.strip().endswith('+'):
-                    isBrokenConCat= True
-                
-                result= regExPattern1.findall(line)
-                if len(result)>0:
-                    line = line.replace('\n',  '  {}\n'.format(todo))
+                    if line.strip().endswith('+'):
+                        isBrokenConCat= True
+                    
+                    result= regExPattern1.findall(line)
+                    if len(result)>0:
+                        line = line.replace('\n',  '  {}\n'.format(todo))
+
+                if isAppendIssueNo and lineNo in issuesDict:
+                    line = line.replace('\n',  '  {}  [Issue No: {}]\n'.format(todo, issuesDict[lineNo]))
 
                 classFile.write(line)
             
