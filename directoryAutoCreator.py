@@ -1,14 +1,19 @@
 import configparser, os, re, datetime, time, xlrd, xlsxwriter
+import logging
 from pathlib import Path
-from os.path import exists
+from os.path import exists, join
 from shutil import copyfile
 from distutils.util import strtobool
 
+logger = logging.getLogger()
+logger.setLevel(logging.DEBUG)
+
 configFileName= 'config.ini'
 
-config_file = os.path.join(Path(__file__).resolve().parent, configFileName)
+currentPath= Path(__file__).resolve().parent
+config_file = join(currentPath, configFileName)
 config = configparser.ConfigParser()
-config.read(config_file,encoding='UTF-8')
+config.read(config_file, encoding='UTF-8')
 
 
 outputFolder= config['PATH']['OUTPUT_PATH'] 
@@ -20,6 +25,7 @@ isAppendIssueNo= strtobool(config['FLAG']['ISSUE_MARKER_FLAG'])
 
 TO_FIX_PATTERN= config['REG_EX']['TO_FIX_PATTERN']
 AFTER_BROKEN_CONCAT_PATTERN= config['REG_EX']['AFTER_BROKEN_CONCAT_PATTERN']
+
 
 def makeDirectory(folderPath):
     if not exists(folderPath):
@@ -34,8 +40,9 @@ def getFindingsFiles(filesToFind):
     rowItemNo= int(config['SHEET']['ROW_ITEM_NO'])
     rowLineNo= int(config['SHEET']['ROW_LINE_NO'])
 
-    sheetName = config['SHEET']['SHEET_NAME']
-    
+    if not exists(findingsFileName):
+        findingsFileName= join(currentPath, findingsFileName)
+
     findingsFileDict= {}
     
     xlsx = xlrd.open_workbook(findingsFileName)
@@ -70,7 +77,7 @@ def extractFiles(path, findingsFileDict, fileSearchPattern):
     # r=root, d=directories, f = files
     for r, d, f in os.walk(path):
         for file in f:
-            filePath= os.path.join(r, file)
+            filePath= join(r, file)
             index= re.search(fileSearchPattern, filePath)
             if index:
                 for fileName in findingsFileDict:
@@ -95,8 +102,8 @@ def getFolderSuffix(start, counter, noOfDigits= 3):
         return '{}-{}'.format('{0:0d}'.replace('d', str(noOfDigits)).format(start), '{0:0d}'.replace('d', str(noOfDigits)).format(start + counter-1))
 
 
-def makeTestFile(outputPathTest, fileName, testClassTemplePath, packageName, className):
-    testFileName= '{}\\Test{}'.format(outputPathTest, fileName)
+def makeTestFile(outputPathTest, testClassTemplePath, packageName, className):
+    testFileName= '{}\\Test{}.java'.format(outputPathTest, className)
     testClass = open(testFileName, 'w', encoding= encoding)
     with open(testClassTemplePath, 'rt', encoding= encoding) as fp:
         for line in fp:
@@ -113,12 +120,11 @@ def makeTestFile(outputPathTest, fileName, testClassTemplePath, packageName, cla
 
 
 def process(findingsFileDict, encoding, folderPrefix, noOfDigits):
-    currentPath= Path(__file__).resolve().parent
-    outputRootPath= os.path.join(currentPath, outputFolder)
+    outputRootPath= join(currentPath, outputFolder)
     testFileOutputPath= config['PATH']['TEST_PATH']
     packagePattern= config['OTHERS']['PACKAGE_PATTERN']
     testClassTemple= config['OTHERS']['TEST_CLASS_TEMPLATE']
-    testClassTemplePath= os.path.join(currentPath, testClassTemple)
+    testClassTemplePath= join(currentPath, testClassTemple)
     regExPattern1= re.compile(TO_FIX_PATTERN)
     regExPattern2= re.compile(AFTER_BROKEN_CONCAT_PATTERN)
     
@@ -135,15 +141,15 @@ def process(findingsFileDict, encoding, folderPrefix, noOfDigits):
         className= fileName[:re.search('\.', fileName).start()]
 
         itemOutputFolder= folderPrefix + getFolderSuffix(start, counter, noOfDigits)
-        outputPath= os.path.join(outputRootPath, itemOutputFolder)
+        outputPath= join(outputRootPath, itemOutputFolder)
         
         initOutputPath= findingsFileName.replace(fileName, '')
-        outputSourcePath= os.path.join(outputPath, initOutputPath)
+        outputSourcePath= join(outputPath, initOutputPath)
         makeDirectory(outputSourcePath)
 
         initOutputPathSplitted= initOutputPath.split('\\')
         outputTestFolder= initOutputPath.replace(initOutputPathSplitted[1], '{}\\{}'.format(initOutputPathSplitted[1], 'test'))
-        outputTestPath= os.path.join(outputPath, outputTestFolder)
+        outputTestPath= join(outputPath, outputTestFolder)
         makeDirectory(outputTestPath)        
 
         with open(sourceFileName, 'rt', encoding= encoding) as fp:
@@ -151,7 +157,7 @@ def process(findingsFileDict, encoding, folderPrefix, noOfDigits):
             packageName= None
             lineNo= 0
             isBrokenConCat= False
-            classFile = open(os.path.join(outputSourcePath, fileName), 'w', encoding= encoding)
+            classFile = open(join(outputSourcePath, fileName), 'w', encoding= encoding)
             
             for line in fp:
                 lineNo += 1
@@ -188,24 +194,23 @@ def process(findingsFileDict, encoding, folderPrefix, noOfDigits):
             
             for i in range(counter):
                 newClassName= '{}{}'.format(className, str(start + i))
-                testFileName= makeTestFile(outputTestPath, fileName.replace(className, newClassName), testClassTemplePath, packageName, newClassName)
+                testFileName= makeTestFile(outputTestPath, testClassTemplePath, packageName, newClassName)
                 
-                originalTestOutputPath= os.path.join(testFileOutputPath, outputTestFolder.replace('{}\\'.format(initOutputPathSplitted[0]),''))
+                originalTestOutputPath= join(testFileOutputPath, outputTestFolder.replace('{}\\'.format(initOutputPathSplitted[0]),''))
                 makeDirectory(originalTestOutputPath)
 
                 workspaceTestFileName= '{}\\Test{}'.format(originalTestOutputPath, fileName.replace(className, newClassName))
 
-                if not isOverwriteFiles and os.path.exists(workspaceTestFileName):
+                if not isOverwriteFiles and exists(workspaceTestFileName):
                     pass
                 else:
                     copyfile(testFileName, workspaceTestFileName)
-
 
 if __name__ == "__main__":
     try:
         start = datetime.datetime.now()
         print(f'\nInitializing...\nTime started: {start}')
-
+        
         sourcePath= config['PATH']['SOURCE_CODE_PATH']
         filesSearchPattern = config['OTHERS']['FILES_SEARCH_PATTERN']
         filesToFind = config['OTHERS']['FILES_TO_FIND']
@@ -220,6 +225,6 @@ if __name__ == "__main__":
         
         finish = datetime.datetime.now()
         print(f'\nTime elapsed:\n{finish - start}')
-        
     except Exception as err:
-        print(f'Error found!\n{err}\n')
+        logger.error(str(err), exc_info=True)
+        input("")
