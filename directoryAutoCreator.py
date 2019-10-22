@@ -26,6 +26,12 @@ isAppendIssueNo= strtobool(config['FLAG']['ISSUE_MARKER_FLAG'])
 TO_FIX_PATTERN= config['REG_EX']['TO_FIX_PATTERN']
 AFTER_BROKEN_CONCAT_PATTERN= config['REG_EX']['AFTER_BROKEN_CONCAT_PATTERN']
 
+PACKAGE_NAME= 'packageName'
+CLASS_NAME= 'className'
+TARGET_ASSET= 'targetAsset'
+TARGET_LINE_NO= 'targetLineNo'
+TARGET_FINDINGS= 'targetFindings'
+
 
 def makeDirectory(folderPath):
     if not exists(folderPath):
@@ -39,7 +45,8 @@ def getFindingsFiles(filesToFind):
     rowFileName= int(config['SHEET']['ROW_FILE_NAME'])
     rowItemNo= int(config['SHEET']['ROW_ITEM_NO'])
     rowLineNo= int(config['SHEET']['ROW_LINE_NO'])
-
+    rowFindings= int(config['SHEET']['ROW_LINE_CONTENT'])
+    
     if not exists(findingsFileName):
         findingsFileName= join(currentPath, findingsFileName)
 
@@ -47,11 +54,9 @@ def getFindingsFiles(filesToFind):
     
     xlsx = xlrd.open_workbook(findingsFileName)
     sheet = xlsx.sheet_by_name(sheetName)
-    lineNo= 0
     
     for row in sheet._cell_values:
         if row[rowIndicator] == indicator and any(row[rowFileName].endswith(f'{extension}') for extension in filesToFind):
-            lineNo += 1
             fileName= row[rowFileName]
             itemNo= int(row[rowItemNo])
             issueLineNo= None
@@ -63,12 +68,16 @@ def getFindingsFiles(filesToFind):
                 findingsCounter= findingsFileDict[fileName]
                 findingsCounter[1]= findingsCounter[1]+1
                 issuesDict= findingsCounter[2]
-                issuesDict[issueLineNo]= itemNo
-                findingsFileDict[fileName]= findingsCounter
             else:
-                issuesDict={}
-                issuesDict[issueLineNo]= itemNo
-                findingsFileDict[fileName]= [lineNo, 1, issuesDict]
+                issuesDict= {}
+                findingsFileDict[fileName]= [itemNo, 1, issuesDict]
+
+            issueDetails= []
+            issueDetails.append(itemNo)
+            issueDetails.append(fileName)
+            issueDetails.append(row[rowLineNo])
+            issueDetails.append(row[rowFindings])
+            issuesDict[itemNo]= issueDetails
             
     return findingsFileDict
 
@@ -102,15 +111,27 @@ def getFolderSuffix(start, counter, noOfDigits= 3):
         return '{}-{}'.format('{0:0d}'.replace('d', str(noOfDigits)).format(start), '{0:0d}'.replace('d', str(noOfDigits)).format(start + counter-1))
 
 
-def makeTestFile(outputPathTest, testClassTemplePath, packageName, className):
+def makeTestFile(outputPathTest, testClassTemplePath, testFileDict):
+    packageName= testFileDict[PACKAGE_NAME]
+    className= testFileDict[CLASS_NAME]
+    targetAsset=  testFileDict[TARGET_ASSET].replace('\\','\\\\')
+    targetLineNo= testFileDict[TARGET_LINE_NO]
+    targetGrep= testFileDict[TARGET_FINDINGS]
+
     testFileName= '{}\\Test{}.java'.format(outputPathTest, className)
     testClass = open(testFileName, 'w', encoding= encoding)
-    with open(testClassTemplePath, 'rt', encoding= encoding) as fp:
+    with open(testClassTemplePath, 'rt', encoding= 'utf-8') as fp:
         for line in fp:
             if '<packageName>' in line:
                 line= line.replace('<packageName>', packageName)
             elif '<ClassName>' in line:
                 line= line.replace('<ClassName>', className)
+            elif '<targetAsset>' in line:
+                line= line.replace('<targetAsset>', targetAsset)
+            elif '<targetLineNo>' in line:
+                line= line.replace('<targetLineNo>', targetLineNo)
+            elif '<targetGrep>' in line:
+                line= line.replace('<targetGrep>', targetGrep)
             
             testClass.write(line)
     if not testClass.closed:
@@ -191,10 +212,18 @@ def process(findingsFileDict, encoding, folderPrefix, noOfDigits):
             if not packageName:
                 index= re.search('test', outputTestPath)
                 packageName= outputTestPath[index.start():len(outputTestPath)-1].replace('\\','.')
-            
+
             for i in range(counter):
-                newClassName= '{}{}'.format(className, str(start + i))
-                testFileName= makeTestFile(outputTestPath, testClassTemplePath, packageName, newClassName)
+                index= start + i
+                newClassName= '{}{}'.format(className, str(index))
+                testFileDict= {}
+                testFileDict[PACKAGE_NAME]= packageName
+                testFileDict[CLASS_NAME]= newClassName
+                testFileDict[TARGET_ASSET]= findingsFileName
+                testFileDict[TARGET_LINE_NO]= issuesDict[index][2]
+                testFileDict[TARGET_FINDINGS]= issuesDict[index][3]
+
+                testFileName= makeTestFile(outputTestPath, testClassTemplePath, testFileDict)
                 
                 originalTestOutputPath= join(testFileOutputPath, outputTestFolder.replace('{}\\'.format(initOutputPathSplitted[0]),''))
                 makeDirectory(originalTestOutputPath)
