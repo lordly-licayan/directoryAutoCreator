@@ -47,6 +47,7 @@ def getFindingsFiles(filesToFind):
     rowLineNo= int(config['SHEET']['ROW_LINE_NO'])
     rowFindings= int(config['SHEET']['ROW_LINE_CONTENT'])
     
+
     if not exists(findingsFileName):
         findingsFileName= join(currentPath, findingsFileName)
 
@@ -116,7 +117,7 @@ def makeTestFile(outputPathTest, testClassTemplePath, testFileDict):
     className= testFileDict[CLASS_NAME]
     targetAsset=  testFileDict[TARGET_ASSET].replace('\\','\\\\')
     targetLineNo= testFileDict[TARGET_LINE_NO]
-    targetGrep= testFileDict[TARGET_FINDINGS]
+    targetFindings= testFileDict[TARGET_FINDINGS]
 
     testFileName= '{}\\Test{}.java'.format(outputPathTest, className)
     testClass = open(testFileName, 'w', encoding= encoding)
@@ -130,8 +131,8 @@ def makeTestFile(outputPathTest, testClassTemplePath, testFileDict):
                 line= line.replace('<targetAsset>', targetAsset)
             elif '<targetLineNo>' in line:
                 line= line.replace('<targetLineNo>', targetLineNo)
-            elif '<targetGrep>' in line:
-                line= line.replace('<targetGrep>', targetGrep)
+            elif '<targetFindings>' in line:
+                line= line.replace('<targetFindings>', targetFindings)
             
             testClass.write(line)
     if not testClass.closed:
