@@ -30,7 +30,7 @@ PACKAGE_NAME= 'packageName'
 CLASS_NAME= 'className'
 TARGET_ASSET= 'targetAsset'
 TARGET_LINE_NO= 'targetLineNo'
-TARGET_FINDINGS= 'targetFindings'
+TARGET_GREP= 'targetGrep'
 
 
 def makeDirectory(folderPath):
@@ -47,7 +47,6 @@ def getFindingsFiles(filesToFind):
     rowLineNo= int(config['SHEET']['ROW_LINE_NO'])
     rowFindings= int(config['SHEET']['ROW_LINE_CONTENT'])
     
-
     if not exists(findingsFileName):
         findingsFileName= join(currentPath, findingsFileName)
 
@@ -69,9 +68,11 @@ def getFindingsFiles(filesToFind):
                 findingsCounter= findingsFileDict[fileName]
                 findingsCounter[1]= findingsCounter[1]+1
                 issuesDict= findingsCounter[2]
+                lineNoDict= findingsCounter[3]
             else:
                 issuesDict= {}
-                findingsFileDict[fileName]= [itemNo, 1, issuesDict]
+                lineNoDict= {}
+                findingsFileDict[fileName]= [itemNo, 1, issuesDict, lineNoDict]
 
             issueDetails= []
             issueDetails.append(itemNo)
@@ -79,6 +80,8 @@ def getFindingsFiles(filesToFind):
             issueDetails.append(row[rowLineNo])
             issueDetails.append(row[rowFindings])
             issuesDict[itemNo]= issueDetails
+            if not issueLineNo:
+                lineNoDict[issueLineNo]= itemNo
             
     return findingsFileDict
 
@@ -117,7 +120,7 @@ def makeTestFile(outputPathTest, testClassTemplePath, testFileDict):
     className= testFileDict[CLASS_NAME]
     targetAsset=  testFileDict[TARGET_ASSET].replace('\\','\\\\')
     targetLineNo= testFileDict[TARGET_LINE_NO]
-    targetFindings= testFileDict[TARGET_FINDINGS]
+    targetGrep= testFileDict[TARGET_GREP]
 
     testFileName= '{}\\Test{}.java'.format(outputPathTest, className)
     testClass = open(testFileName, 'w', encoding= encoding)
@@ -131,8 +134,8 @@ def makeTestFile(outputPathTest, testClassTemplePath, testFileDict):
                 line= line.replace('<targetAsset>', targetAsset)
             elif '<targetLineNo>' in line:
                 line= line.replace('<targetLineNo>', targetLineNo)
-            elif '<targetFindings>' in line:
-                line= line.replace('<targetFindings>', targetFindings)
+            elif '<targetGrep>' in line:
+                line= line.replace('<targetGrep>', targetGrep.replace('"','\\"'))
             
             testClass.write(line)
     if not testClass.closed:
@@ -157,9 +160,10 @@ def process(findingsFileDict, encoding, folderPrefix, noOfDigits):
         start= findingsInfo[0]
         counter= findingsInfo[1]
         issuesDict= findingsInfo[2]
-        sourceFileName= findingsInfo[3]
-        fileName= findingsInfo[4]
-        findingsFileName= findingsInfo[5]
+        lineNoFindings= findingsInfo[3]
+        sourceFileName= findingsInfo[4]
+        fileName= findingsInfo[5]
+        findingsFileName= findingsInfo[6]
         className= fileName[:re.search('\.', fileName).start()]
 
         itemOutputFolder= folderPrefix + getFolderSuffix(start, counter, noOfDigits)
@@ -183,7 +187,7 @@ def process(findingsFileDict, encoding, folderPrefix, noOfDigits):
             
             for line in fp:
                 lineNo += 1
-                
+
                 result= re.findall(packagePattern, line)
                 if len(result) > 0:
                     packageName= 'test.{}'.format(result[0])
@@ -202,8 +206,8 @@ def process(findingsFileDict, encoding, folderPrefix, noOfDigits):
                     if len(result)>0:
                         line = line.replace('\n',  '  {}\n'.format(todo))
 
-                if isAppendIssueNo and lineNo in issuesDict:
-                    line = line.replace('\n',  '  {}  [Issue No: {}]\n'.format(todo, issuesDict[lineNo]))
+                if isAppendIssueNo and lineNo in lineNoFindings:
+                    line = line.replace('\n',  '  {}  [Issue No: {}]\n'.format(todo, lineNoFindings[lineNo]))
 
                 classFile.write(line)
             
@@ -222,7 +226,7 @@ def process(findingsFileDict, encoding, folderPrefix, noOfDigits):
                 testFileDict[CLASS_NAME]= newClassName
                 testFileDict[TARGET_ASSET]= findingsFileName
                 testFileDict[TARGET_LINE_NO]= issuesDict[index][2]
-                testFileDict[TARGET_FINDINGS]= issuesDict[index][3]
+                testFileDict[TARGET_GREP]= issuesDict[index][3]
 
                 testFileName= makeTestFile(outputTestPath, testClassTemplePath, testFileDict)
                 
