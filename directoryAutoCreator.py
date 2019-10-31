@@ -30,7 +30,7 @@ PACKAGE_NAME= 'packageName'
 CLASS_NAME= 'className'
 TARGET_ASSET= 'targetAsset'
 TARGET_LINE_NO= 'targetLineNo'
-TARGET_GREP= 'targetGrep'
+TARGET_FINDINGS= 'targetFindings'
 
 
 def makeDirectory(folderPath):
@@ -120,7 +120,7 @@ def makeTestFile(outputPathTest, testClassTemplePath, testFileDict):
     className= testFileDict[CLASS_NAME]
     targetAsset=  testFileDict[TARGET_ASSET].replace('\\','\\\\')
     targetLineNo= testFileDict[TARGET_LINE_NO]
-    targetGrep= testFileDict[TARGET_GREP]
+    targetFindings= testFileDict[TARGET_FINDINGS]
 
     testFileName= '{}\\Test{}.java'.format(outputPathTest, className)
     testClass = open(testFileName, 'w', encoding= encoding)
@@ -134,8 +134,8 @@ def makeTestFile(outputPathTest, testClassTemplePath, testFileDict):
                 line= line.replace('<targetAsset>', targetAsset)
             elif '<targetLineNo>' in line:
                 line= line.replace('<targetLineNo>', targetLineNo)
-            elif '<targetGrep>' in line:
-                line= line.replace('<targetGrep>', targetGrep.replace('"','\\"'))
+            elif '<targetFindings>' in line:
+                line= line.replace('<targetFindings>', targetFindings.replace('"','\\"'))
             
             testClass.write(line)
     if not testClass.closed:
@@ -226,7 +226,7 @@ def process(findingsFileDict, encoding, folderPrefix, noOfDigits):
                 testFileDict[CLASS_NAME]= newClassName
                 testFileDict[TARGET_ASSET]= findingsFileName
                 testFileDict[TARGET_LINE_NO]= issuesDict[index][2]
-                testFileDict[TARGET_GREP]= issuesDict[index][3]
+                testFileDict[TARGET_FINDINGS]= issuesDict[index][3]
 
                 testFileName= makeTestFile(outputTestPath, testClassTemplePath, testFileDict)
                 
